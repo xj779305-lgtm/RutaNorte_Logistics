@@ -1,0 +1,7 @@
+class IUnidadDeTrabajo {
+public:
+    virtual ~IUnidadDeTrabajo() = default;
+    virtual void iniciar() = 0;
+    virtual void confirmar() = 0;
+    virtual void revertir() = 0;
+};
