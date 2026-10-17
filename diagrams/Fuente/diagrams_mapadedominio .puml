@@ -1,0 +1,180 @@
+@startuml 00_mapa_de_dominio
+title Mapa de dominio - RutaNorte Logistics\nSistema de gestión de recolección, traslado y entrega de mercancía (Unidad 3)
+
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam defaultFontName Arial
+skinparam ArrowColor #555555
+skinparam packageStyle rectangle
+skinparam nodesep 40
+skinparam ranksep 50
+hide circle
+
+skinparam class {
+  BackgroundColor<<ENTIDAD_RAIZ>> #FFE7B3
+  BorderColor<<ENTIDAD_RAIZ>> #E0A030
+  BackgroundColor<<ENTIDAD>> #FFE7B3
+  BorderColor<<ENTIDAD>> #E0A030
+  BackgroundColor<<VALUE_OBJECT>> #FFFFFF
+  BorderColor<<VALUE_OBJECT>> #555555
+  BackgroundColor<<DOMAIN_SERVICE>> #DCEBFA
+  BorderColor<<DOMAIN_SERVICE>> #2E75B6
+  BackgroundColor<<DOMAIN_EVENTS>> #F0E6FA
+  BorderColor<<DOMAIN_EVENTS>> #8E5CC9
+  BackgroundColor<<REFERENCIA>> #EEEEEE
+  BorderColor<<REFERENCIA>> #8A8A8A
+}
+
+' ---------------- Cliente (solo referencia) ----------------
+class "Cliente (solo referencia)" as Cliente <<REFERENCIA>> {
+  identificador de cliente
+  esCorporativo (G-22)
+  contrato y tarifario fuera de alcance
+}
+
+' ---------------- Aggregate Cotización ----------------
+package "Aggregate: Cotización" #FFF3DC {
+  class "Cotización  (raíz: Folio)" as Cotizacion <<ENTIDAD_RAIZ>> {
+    estatus: Solicitado, Cotizado, Confirmado
+    costo calculado
+    +confirmar()
+    +rechazar()
+  }
+  class "Value Objects de la cotización" as VOCotizacion <<VALUE_OBJECT>> {
+    Folio
+    MercanciaDeclarada
+    Origen, Destino
+    TipoDeUnidad
+    RequerimientosEspeciales
+    Dinero (Costo)
+  }
+  Cotizacion *-- VOCotizacion
+}
+
+' ---------------- Aggregate OrdenDeServicio ----------------
+package "Aggregate: OrdenDeServicio (límite de consistencia)" #FFF3DC {
+  class "OrdenDeServicio  (raíz: Número de orden)" as Orden <<ENTIDAD_RAIZ>> {
+    protege estatus, evidencia y bitácora
+    Asignación: UnidadId, OperadorId, Ruta, HorarioDeRecolección
+    Folio de la cotización
+    MercanciaDeclarada, EstatusDelServicio
+  }
+  class Incidencia <<ENTIDAD>> {
+    TipoDeIncidencia, TipoDeDiscrepancia
+    fotos, observaciones
+    avería, mercancía rechazada,
+    destinatario ausente, entrega con daños
+  }
+  class EvidenciaDeEntrega <<VALUE_OBJECT>> {
+    foto, firma digital, Receptor
+    Coordenadas, estampa de tiempo
+    inmutable una vez registrada
+  }
+  class "EntradaDeBitácora" as EntradaDeBitacora <<VALUE_OBJECT>> {
+    evento, estatus, fecha y hora
+    responsable (no se modifica)
+  }
+  class EstatusDelServicio <<VALUE_OBJECT>> {
+    Solicitado, Cotizado, Confirmado,
+    Unidad asignada, Recolectado, En tránsito,
+    Llegada a destino, Entregado
+  }
+  Orden *-- "0..*" Incidencia
+  Orden *-- "0..1" EvidenciaDeEntrega
+  Orden *-- "1..*" EntradaDeBitacora
+  Orden *-- EstatusDelServicio
+}
+
+' ---------------- Aggregates Unidad y Operador ----------------
+package "Aggregate: Unidad" #FFF3DC {
+  class "Unidad  (raíz: código)" as Unidad <<ENTIDAD_RAIZ>> {
+    TipoDeUnidad, disponibilidad
+    una unidad averiada no se asigna
+    no se asigna a dos servicios en conflicto
+  }
+}
+package "Aggregate: Operador" #FFF3DC {
+  class "Operador  (raíz: identificador)" as Operador <<ENTIDAD_RAIZ>> {
+    disponibilidad, esComodín (G-07)
+    un operador indispuesto no se asigna
+  }
+}
+
+' ---------------- Servicios de dominio ----------------
+package "Servicios de dominio" #E8F2FC {
+  class "PriorizaciónDeAsignación" as Priorizacion <<DOMAIN_SERVICE>> {
+    decide qué solicitud obtiene la unidad
+    (contrato, volumen, antigüedad,
+    rentabilidad, orden de llegada)
+  }
+  class "PolíticaDeCargaDeAltoValor" as Politica <<DOMAIN_SERVICE>> {
+    evalúa el umbral y devuelve controles:
+    unidad escolta y doble firma
+  }
+  class "CalculadoraDeCotización" as Calculadora <<DOMAIN_SERVICE>> {
+    costo por distancia, peso, volumen
+    y tipo de unidad (fuera de los CU)
+  }
+}
+
+' ---------------- Eventos de dominio ----------------
+package "Eventos de dominio" #F0E6FA {
+  class "Eventos de dominio" as Eventos <<DOMAIN_EVENTS>> {
+    CotizacionConfirmada
+    OrdenDeServicioGenerada, UnidadAsignada
+    OperadorReasignado
+    MercanciaRecolectada, MercanciaRechazada
+    TrasladoIniciado, AveriaReportada
+    DestinatarioAusenteReportado
+    EntregaConAnomaliasRegistrada
+    EntregaRealizada
+  }
+}
+
+' ---------------- Relaciones entre agregados ----------------
+Cliente "1" ..> "0..*" Cotizacion : solicita\n(ClienteId)
+Cotizacion "1" ..> "0..1" Orden : genera\n(por Folio)
+Orden "0..*" ..> "1" Unidad : UnidadId
+Orden "0..*" ..> "1" Operador : OperadorId
+Calculadora ..> Cotizacion : calcula el costo
+Priorizacion ..> Unidad : consulta
+Priorizacion ..> Orden : usa
+Politica ..> Orden : evalúa
+Orden ..> Eventos : publica
+Cotizacion ..> Eventos : publica
+
+' ---------------- Reglas e invariantes ----------------
+note as Invariantes #FFF8D6
+  <b>Reglas de negocio e invariantes</b>
+  1. Solo se crea desde una cotización "Confirmado".
+  2. Solo Operaciones modifica una orden confirmada (RN-02).
+  3. El estatus solo avanza por transiciones válidas (G-16).
+  4. No pasa a "Recolectado" si no coincide con lo declarado (US-05, US-09).
+  5. Alto valor exige unidad escolta y doble firma (US-12).
+  6. No pasa a "Entregado" sin evidencia completa e inalterable (RN-03, US-13).
+  7. Todo cambio de estatus o incidencia agrega una entrada de bitácora (G-18).
+  8. Una unidad averiada o un operador indispuesto no se asignan (US-07, US-08).
+end note
+Invariantes .. Orden
+
+' ---------------- Relaciones y decisiones pendientes ----------------
+note as Relaciones #E8F2FC
+  <b>Relaciones principales (multiplicidad)</b>
+  Cliente 1 -> 0..* Cotización  |  Cotización 1 -> 0..1 OrdenDeServicio (por Folio)
+  OrdenDeServicio 1 -> 0..* Incidencia  |  1 -> 0..1 EvidenciaDeEntrega  |  1 -> 1..* EntradaDeBitácora
+  OrdenDeServicio 0..* -> 1 Unidad (por id)  |  0..* -> 1 Operador (por id)
+end note
+
+note as Pendientes #F7F7F7
+  <b>Decisiones pendientes de validar</b>
+  Umbral de alto valor y quién aporta la doble firma (H-01)
+  Orden de los criterios de prioridad (H-02)
+  Estatus propio para mercancía rechazada (H-05)
+  Historia de "Reintento de entrega" (H-06, G-29)
+  Fuente del tiempo estimado y costos (H-09)
+  Rol Gerente de Operaciones (H-10)
+  Órdenes de clientes con tarifario (H-11)
+end note
+Relaciones -[hidden]- Pendientes
+
+@enduml

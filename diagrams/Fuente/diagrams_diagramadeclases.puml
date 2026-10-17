@@ -1,0 +1,242 @@
+@startuml 01_diagrama_de_clases
+title Diagrama de clases - RutaNorte Logistics
+
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+skinparam defaultFontName Arial
+skinparam ArrowColor #1F4E9E
+skinparam packageStyle rectangle
+skinparam nodesep 45
+skinparam ranksep 55
+hide circle
+
+skinparam class {
+  BackgroundColor<<APPLICATION>> #DCEBFA
+  BorderColor<<APPLICATION>> #2E75B6
+  BackgroundColor<<DOMAIN>> #FFE7B3
+  BorderColor<<DOMAIN>> #E0A030
+  BackgroundColor<<INFRAESTRUCTURA>> #E7D9F7
+  BorderColor<<INFRAESTRUCTURA>> #8E5CC9
+}
+skinparam interface {
+  BackgroundColor<<APPLICATION>> #DCEBFA
+  BorderColor<<APPLICATION>> #2E75B6
+  BackgroundColor<<DOMAIN>> #FFE7B3
+  BorderColor<<DOMAIN>> #E0A030
+}
+
+' ===================== CAPA DE APLICACION =====================
+package "Capa de aplicación (casos de uso, CQRS y puertos)" #F7FBFE {
+  class ServicioDeOrdenes <<APPLICATION>> {
+    +generarOrdenDeServicio()  [CU-01]
+  }
+  class ServicioDeRecoleccion <<APPLICATION>> {
+    +registrarRecoleccion()  [CU-02]
+    +rechazarMercancia()  [CU-03]
+  }
+  class ServicioDeEntrega <<APPLICATION>> {
+    +registrarEntrega()  [CU-04]
+    +registrarEntregaConAnomalias()  [CU-05]
+  }
+  class ConsultarEstatusDeOrdenHandler <<APPLICATION>> {
+    +manejar(ConsultarEstatusDeOrden)
+  }
+  class ObtenerReporteDeEficienciaHandler <<APPLICATION>> {
+    +manejar(ObtenerReporteDeEficiencia)
+  }
+  class EstatusDeOrdenVista <<APPLICATION>> {
+    numeroDeOrden, estatus
+    ubicación, historial
+  }
+  class ReporteDeEficienciaVista <<APPLICATION>> {
+    promedios, retrasos
+    rentabilidad
+  }
+  interface IUnidadDeTrabajo <<APPLICATION>> {
+    +iniciar()
+    +confirmar()
+    +revertir()
+  }
+  interface INotificador <<APPLICATION>> {
+    +alertar(rol, numeroDeOrden, mensaje)
+  }
+  interface IAlmacenDeEvidencias <<APPLICATION>> {
+    +guardar(archivos) : referencia
+  }
+  interface IProveedorGps <<APPLICATION>> {
+    +obtenerEstatus(numeroDeOrden)
+  }
+  interface IConsultasDeSeguimiento <<APPLICATION>> {
+    +consultarEstatus(numeroDeOrden)
+  }
+  interface IConsultasDeReportes <<APPLICATION>> {
+    +obtenerReporte(periodo, ruta, cliente)
+  }
+}
+
+' ===================== CAPA DE DOMINIO =====================
+package "Capa de dominio (agregados, políticas e interfaces de Repository)" #FFFBF5 {
+  class OrdenDeServicio <<DOMAIN>> {
+    numeroDeOrden : NúmeroDeOrden
+    folioDeCotización : Folio
+    estatus : EstatusDelServicio
+    asignación : UnidadId, OperadorId, Ruta, HorarioDeRecolección
+    --
+    +generarDesde(cotización, rol)
+    +asignarRecursos()
+    +reasignarOperador()
+    +registrarRecoleccion()
+    +rechazarMercancia()
+    +iniciarTraslado()
+    +reportarAveria()
+    +registrarEntrega()
+    +registrarEntregaConAnomalias()
+  }
+  class Incidencia <<DOMAIN>> {
+    tipo : TipoDeIncidencia
+    fotos, observaciones
+  }
+  class "EntradaDeBitácora" as EntradaDeBitacora <<DOMAIN>> {
+    evento, estatus
+    fecha y hora, responsable
+  }
+  class EvidenciaDeEntrega <<DOMAIN>> {
+    foto, firma digital, receptor
+    coordenadas, estampa de tiempo
+    (inalterable)
+  }
+  class Unidad <<DOMAIN>> {
+    código
+    tipoDeUnidad, disponibilidad
+    +puedeAsignarse()
+    +marcarAsignada()
+    +marcarAveriada()
+  }
+  class Operador <<DOMAIN>> {
+    identificador
+    disponibilidad, esComodín
+    +puedeAsignarse()
+    +marcarAsignado()
+    +marcarIndispuesto()
+  }
+  class "Cotización" as Cotizacion <<DOMAIN>> {
+    folio : Folio
+    estatus, costo
+    +registrarCosto()
+    +confirmar()
+    +rechazar()
+  }
+  class "PriorizaciónDeAsignación" as Priorizacion <<DOMAIN>> {
+    +decidir(solicitudes, unidad)
+  }
+  interface CriterioDePrioridad <<DOMAIN>> {
+    +evaluar(solicitud)
+  }
+  class "PolíticaDeCargaDeAltoValor" as Politica <<DOMAIN>> {
+    +evaluar(orden) : controles
+  }
+  class "CalculadoraDeCotización" as Calculadora <<DOMAIN>> {
+    +calcular(ruta, peso, volumen, unidad)
+  }
+  interface OrdenDeServicioRepository <<DOMAIN>> {
+    +obtenerPorNumero(numeroDeOrden)
+    +existeParaCotizacion(folio)
+    +agregar(orden)
+    +guardar(orden)
+  }
+  interface CotizacionRepository <<DOMAIN>> {
+    +obtenerPorFolio(folio)
+    +agregar(cotización)
+    +guardar(cotización)
+  }
+  interface UnidadRepository <<DOMAIN>> {
+    +obtenerPorId(id)
+    +listarDisponibles(tipoDeUnidad, horario)
+    +guardar(unidad)
+  }
+  interface OperadorRepository <<DOMAIN>> {
+    +obtenerPorId(id)
+    +listarDisponibles(horario)
+    +obtenerComodinDisponible(horario)
+    +guardar(operador)
+  }
+}
+
+' ===================== INFRAESTRUCTURA =====================
+package "Capa de infraestructura (implementaciones)" #FBF7FD {
+  class "Repositorios SQL (ORM)" as RepositoriosSql <<INFRAESTRUCTURA>> {
+    RepositorioDeOrdenesSql
+    repositorios de Cotización, Unidad y Operador
+    versión en memoria para pruebas
+  }
+  class "Adaptadores de puertos" as AdaptadoresPuertos <<INFRAESTRUCTURA>> {
+    UnidadDeTrabajoSql
+    Almacenamiento de archivos
+    Notificaciones en la plataforma
+  }
+  class "Adaptadores de consulta y GPS" as AdaptadoresConsulta <<INFRAESTRUCTURA>> {
+    Adaptador a la API del proveedor de GPS
+    Consultas de lectura (Transaction Script)
+  }
+}
+
+' ===================== RELACIONES =====================
+' Servicios -> puertos, repositorios y políticas (Etapa 4)
+ServicioDeOrdenes ..> IUnidadDeTrabajo : usa
+ServicioDeOrdenes ..> CotizacionRepository
+ServicioDeOrdenes ..> OrdenDeServicioRepository
+ServicioDeOrdenes ..> UnidadRepository
+ServicioDeOrdenes ..> OperadorRepository
+ServicioDeOrdenes ..> Priorizacion
+
+ServicioDeRecoleccion ..> INotificador : notifica
+ServicioDeRecoleccion ..> IUnidadDeTrabajo
+ServicioDeRecoleccion ..> IAlmacenDeEvidencias
+ServicioDeRecoleccion ..> OrdenDeServicioRepository
+ServicioDeRecoleccion ..> Politica
+
+ServicioDeEntrega ..> IAlmacenDeEvidencias : usa
+ServicioDeEntrega ..> IUnidadDeTrabajo
+ServicioDeEntrega ..> OrdenDeServicioRepository
+
+ServicioDeOrdenes ..> OrdenDeServicio : coordina
+ServicioDeRecoleccion ..> OrdenDeServicio : coordina
+ServicioDeEntrega ..> OrdenDeServicio : coordina
+
+' CQRS (Queries)
+ConsultarEstatusDeOrdenHandler ..> IConsultasDeSeguimiento : consulta
+ConsultarEstatusDeOrdenHandler ..> IProveedorGps : consulta
+ConsultarEstatusDeOrdenHandler ..> EstatusDeOrdenVista : devuelve
+ObtenerReporteDeEficienciaHandler ..> IConsultasDeReportes : consulta
+ObtenerReporteDeEficienciaHandler ..> ReporteDeEficienciaVista : devuelve
+
+' Dominio
+OrdenDeServicio *-- "0..*" Incidencia
+OrdenDeServicio *-- "1..*" EntradaDeBitacora
+OrdenDeServicio *-- "0..1" EvidenciaDeEntrega
+OrdenDeServicio ..> Unidad : UnidadId\n0..* -> 1
+OrdenDeServicio ..> Operador : OperadorId\n0..* -> 1
+OrdenDeServicio ..> Cotizacion : Folio\n0..1 -> 1
+Priorizacion o-- CriterioDePrioridad : criterios
+Priorizacion ..> OrdenDeServicio : usa
+Politica ..> OrdenDeServicio : evalúa
+Calculadora ..> Cotizacion : calcula costo
+
+OrdenDeServicioRepository ..> OrdenDeServicio : gestiona\n1 - 1
+CotizacionRepository ..> Cotizacion : gestiona\n1 - 1
+UnidadRepository ..> Unidad : gestiona\n1 - 1
+OperadorRepository ..> Operador : gestiona\n1 - 1
+
+' Implementaciones (Dependency Inversion)
+RepositoriosSql ..|> OrdenDeServicioRepository : implementa
+RepositoriosSql ..|> CotizacionRepository
+RepositoriosSql ..|> UnidadRepository
+RepositoriosSql ..|> OperadorRepository
+AdaptadoresPuertos ..|> IUnidadDeTrabajo : implementa
+AdaptadoresPuertos ..|> IAlmacenDeEvidencias
+AdaptadoresPuertos ..|> INotificador
+AdaptadoresConsulta ..|> IProveedorGps : implementa
+AdaptadoresConsulta ..|> IConsultasDeSeguimiento
+AdaptadoresConsulta ..|> IConsultasDeReportes
+
+@enduml

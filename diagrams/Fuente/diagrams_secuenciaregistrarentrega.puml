@@ -1,0 +1,61 @@
+@startuml 02_secuencia_1_registrar_entrega
+title Secuencia 1 - Registrar entrega con evidencia (CU-04 · US-13 · RN-03)
+
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam sequenceMessageAlign center
+skinparam ParticipantPadding 20
+skinparam BoxPadding 10
+autonumber off
+
+box "Actores" #F0F0F0
+  actor Operador
+  participant "App del operador" as App
+end box
+box "Capa de aplicación" #DEEBF7
+  participant ServicioDeEntrega as SE
+  participant IUnidadDeTrabajo as UOW
+  participant IAlmacenDeEvidencias as ALM
+end box
+box "Capa de dominio" #FDECD6
+  participant OrdenDeServicioRepository as REP
+  participant OrdenDeServicio as ORD
+end box
+
+Operador -> App : captura nombre e identificación del receptor,\nfoto, firma digital, coordenadas y fecha/hora
+App -> SE : registrarEntrega(numeroDeOrden, receptor, foto, firma, coordenadas, fechaHora)
+SE -> UOW : iniciar()
+SE -> REP : obtenerPorNumero(numeroDeOrden)
+REP --> SE : orden
+SE -> ALM : guardar(foto, firma)
+ALM --> SE : referencias de los archivos
+SE -> ORD : registrarEntrega(receptor, evidencia)
+note over ORD #FFF8B0
+  valida estatus "Llegada a destino",
+  evidencia completa (RN-03) y
+  doble firma si es carga de alto valor
+end note
+
+alt evidencia completa y estatus válido
+  note over ORD #FFF8B0
+    estatus = "Entregado"
+    registra en Bitácora
+    emite EntregaRealizada
+  end note
+  ORD --> SE : ok
+  SE -> REP : guardar(orden)
+  SE -> UOW : confirmar()
+  note right of UOW #FFF8B0
+    despacha los eventos
+    después del commit
+  end note
+  SE --> App : estatus "Entregado" y evidencia almacenada
+  App --> Operador : servicio cerrado
+else evidencia incompleta o transición inválida
+  ORD --> SE : error de negocio\n(EvidenciaIncompleta / TransicionDeEstatusInvalida)
+  SE -> UOW : revertir()
+  SE --> App : error en términos del negocio
+  App --> Operador : solicita completar la evidencia
+end
+
+@enduml

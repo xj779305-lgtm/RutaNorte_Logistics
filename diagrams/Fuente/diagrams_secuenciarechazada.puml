@@ -1,0 +1,62 @@
+@startuml 03_secuencia_2_rechazar_mercancia
+title Secuencia 2 - Rechazar mercancía por discrepancia en origen (CU-03 · US-09)
+
+skinparam shadowing false
+skinparam defaultFontName Arial
+skinparam sequenceMessageAlign center
+skinparam ParticipantPadding 20
+skinparam BoxPadding 10
+autonumber off
+
+box "Actores" #F0F0F0
+  actor Operador
+  actor Operaciones
+  participant "App del operador" as App
+end box
+box "Capa de aplicación" #DEEBF7
+  participant ServicioDeRecoleccion as SR
+  participant IUnidadDeTrabajo as UOW
+  participant IAlmacenDeEvidencias as ALM
+  participant INotificador as NOT
+end box
+box "Capa de dominio" #FDECD6
+  participant OrdenDeServicioRepository as REP
+  participant OrdenDeServicio as ORD
+end box
+
+Operador -> App : inspecciona y encuentra una discrepancia,\nselecciona "Mercancía rechazada" y adjunta fotos
+App -> SR : rechazarMercancia(numeroDeOrden, tipoDeDiscrepancia, fotos, observaciones)
+SR -> UOW : iniciar()
+SR -> REP : obtenerPorNumero(numeroDeOrden)
+REP --> SR : orden
+SR -> ALM : guardar(fotos)
+ALM --> SR : referencias de las fotos
+SR -> ORD : rechazarMercancia(tipoDeDiscrepancia, referencias, observaciones)
+note over ORD #FFF8B0
+  valida tipo de discrepancia (G-13),
+  fotos y estatus de la orden
+end note
+
+alt discrepancia válida con fotos
+  note over ORD #FFF8B0
+    registra Incidencia "Mercancía rechazada"
+    registra en Bitácora y detiene el flujo
+    emite MercanciaRechazada
+  end note
+  ORD --> SR : ok
+  SR -> REP : guardar(orden)
+  SR -> UOW : confirmar()
+  SR -> NOT : alertar(Operaciones, numeroDeOrden, mensaje)
+  NOT --> Operaciones : aviso de mercancía rechazada
+  SR --> App : incidencia registrada y orden detenida
+  App --> Operador : espera instrucciones de Operaciones
+else sin tipo de discrepancia, sin fotos o transición inválida
+  ORD --> SR : error de negocio\n(DiscrepanciaDeMercancia / EvidenciaIncompleta / TransicionDeEstatusInvalida)
+  SR -> UOW : revertir()
+  SR --> App : error en términos del negocio
+  App --> Operador : solicita tipo de discrepancia y fotos
+end
+
+note over Operaciones #FFF8B0 : Operaciones resuelve la discrepancia con el cliente (BPMN)
+
+@enduml
